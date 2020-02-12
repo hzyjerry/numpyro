@@ -11,6 +11,14 @@ AutoContinuous
     :show-inheritance:
     :member-order: bysource
 
+AutoBNAFNormal
+--------------
+.. autoclass:: numpyro.contrib.autoguide.AutoBNAFNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 AutoDiagonalNormal
 ------------------
 .. autoclass:: numpyro.contrib.autoguide.AutoDiagonalNormal
@@ -38,6 +46,14 @@ AutoIAFNormal
 AutoLaplaceApproximation
 ------------------------
 .. autoclass:: numpyro.contrib.autoguide.AutoLaplaceApproximation
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+AutoLowRankMultivariateNormal
+-----------------------------
+.. autoclass:: numpyro.contrib.autoguide.AutoLowRankMultivariateNormal
     :members:
     :undoc-members:
     :show-inheritance:

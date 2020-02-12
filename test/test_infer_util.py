@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 from functools import partial
 
 from numpy.testing import assert_allclose
@@ -34,8 +37,10 @@ def beta_bernoulli():
     data = dist.Bernoulli(true_probs).sample(random.PRNGKey(0), (N,))
 
     def model(data=None):
-        beta = numpyro.sample("beta", dist.Beta(np.ones(2), np.ones(2)))
+        with numpyro.plate("dim", 2):
+            beta = numpyro.sample("beta", dist.Beta(1., 1.))
         with numpyro.plate("plate", N, dim=-2):
+            numpyro.deterministic("beta_sq", beta ** 2)
             numpyro.sample("obs", dist.Bernoulli(beta), obs=data)
 
     return model, data, true_probs
@@ -48,13 +53,14 @@ def test_predictive(parallel):
     mcmc.run(random.PRNGKey(0), data)
     samples = mcmc.get_samples()
     predictive = Predictive(model, samples, parallel=parallel)
-    predictive_samples = predictive.get_samples(random.PRNGKey(1))
-    assert predictive_samples.keys() == {"obs"}
+    predictive_samples = predictive(random.PRNGKey(1))
+    assert predictive_samples.keys() == {"beta_sq", "obs"}
 
-    predictive.return_sites = ["beta", "obs"]
-    predictive_samples = predictive.get_samples(random.PRNGKey(1))
+    predictive.return_sites = ["beta", "beta_sq", "obs"]
+    predictive_samples = predictive(random.PRNGKey(1))
     # check shapes
     assert predictive_samples["beta"].shape == (100,) + true_probs.shape
+    assert predictive_samples["beta_sq"].shape == (100,) + true_probs.shape
     assert predictive_samples["obs"].shape == (100,) + data.shape
     # check sample mean
     assert_allclose(predictive_samples["obs"].reshape((-1,) + true_probs.shape).mean(0), true_probs, rtol=0.1)
@@ -66,6 +72,7 @@ def test_predictive_with_guide():
     def model(data):
         f = numpyro.sample("beta", dist.Beta(1., 1.))
         with numpyro.plate("plate", 10):
+            numpyro.deterministic("beta_sq", f ** 2)
             numpyro.sample("obs", dist.Bernoulli(f), obs=data)
 
     def guide(data):
@@ -84,8 +91,9 @@ def test_predictive_with_guide():
 
     svi_state = lax.fori_loop(0, 1000, body_fn, svi_state)
     params = svi.get_params(svi_state)
-    predictive = Predictive(model, guide=guide, params=params, num_samples=1000)
-    obs_pred = predictive.get_samples(random.PRNGKey(2), data=None)["obs"]
+    predictive = Predictive(model, guide=guide, params=params, num_samples=1000)(random.PRNGKey(2), data=None)
+    assert predictive["beta_sq"].shape == (1000,)
+    obs_pred = predictive["obs"]
     assert_allclose(np.mean(obs_pred), 0.8, atol=0.05)
 
 
@@ -102,14 +110,14 @@ def test_predictive_with_improper():
     mcmc = MCMC(kernel, num_warmup=1000, num_samples=1000)
     mcmc.run(random.PRNGKey(0), data)
     samples = mcmc.get_samples()
-    obs_pred = Predictive(model, samples).get_samples(random.PRNGKey(1), data=None)["obs"]
+    obs_pred = Predictive(model, samples)(random.PRNGKey(1), data=None)["obs"]
     assert_allclose(np.mean(obs_pred), true_coef, atol=0.05)
 
 
 def test_prior_predictive():
     model, data, true_probs = beta_bernoulli()
-    predictive_samples = Predictive(model, num_samples=100).get_samples(random.PRNGKey(1))
-    assert predictive_samples.keys() == {"beta", "obs"}
+    predictive_samples = Predictive(model, num_samples=100)(random.PRNGKey(1))
+    assert predictive_samples.keys() == {"beta", "beta_sq", "obs"}
 
     # check shapes
     assert predictive_samples["beta"].shape == (100,) + true_probs.shape
@@ -118,7 +126,7 @@ def test_prior_predictive():
 
 def test_log_likelihood():
     model, data, _ = beta_bernoulli()
-    samples = Predictive(model, return_sites=["beta"], num_samples=100).get_samples(random.PRNGKey(1))
+    samples = Predictive(model, return_sites=["beta"], num_samples=100)(random.PRNGKey(1))
     loglik = log_likelihood(model, samples, data)
     assert loglik.keys() == {"obs"}
     # check shapes
@@ -192,11 +200,13 @@ def test_initialize_model_change_point(init_strategy):
     ])
 
     rng_keys = random.split(random.PRNGKey(1), 2)
-    init_params, _, _ = initialize_model(rng_keys, model, count_data,
-                                         init_strategy=init_strategy)
+    init_params, _, _ = initialize_model(rng_keys, model,
+                                         init_strategy=init_strategy,
+                                         model_args=(count_data,))
     for i in range(2):
-        init_params_i, _, _ = initialize_model(rng_keys[i], model, count_data,
-                                               init_strategy=init_strategy)
+        init_params_i, _, _ = initialize_model(rng_keys[i], model,
+                                               init_strategy=init_strategy,
+                                               model_args=(count_data,))
         for name, p in init_params.items():
             # XXX: the result is equal if we disable fast-math-mode
             assert_allclose(p[i], init_params_i[name], atol=1e-6)
@@ -219,11 +229,13 @@ def test_initialize_model_dirichlet_categorical(init_strategy):
     data = dist.Categorical(true_probs).sample(random.PRNGKey(1), (2000,))
 
     rng_keys = random.split(random.PRNGKey(1), 2)
-    init_params, _, _ = initialize_model(rng_keys, model, data,
-                                         init_strategy=init_strategy)
+    init_params, _, _ = initialize_model(rng_keys, model,
+                                         init_strategy=init_strategy,
+                                         model_args=(data,))
     for i in range(2):
-        init_params_i, _, _ = initialize_model(rng_keys[i], model, data,
-                                               init_strategy=init_strategy)
+        init_params_i, _, _ = initialize_model(rng_keys[i], model,
+                                               init_strategy=init_strategy,
+                                               model_args=(data,))
         for name, p in init_params.items():
             # XXX: the result is equal if we disable fast-math-mode
             assert_allclose(p[i], init_params_i[name], atol=1e-6)

@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 .. warning::
     The interface for the `contrib.autoguide` module is experimental, and
@@ -16,9 +19,10 @@ from jax.tree_util import tree_map
 import numpyro
 from numpyro import handlers
 from numpyro.contrib.nn.auto_reg_nn import AutoregressiveNN
+from numpyro.contrib.nn.block_neural_arn import BlockNeuralAutoregressiveNN
 import numpyro.distributions as dist
 from numpyro.distributions import constraints
-from numpyro.distributions.flows import InverseAutoregressiveTransform
+from numpyro.distributions.flows import BlockNeuralAutoregressiveTransform, InverseAutoregressiveTransform
 from numpyro.distributions.transforms import (
     AffineTransform,
     ComposeTransform,
@@ -27,7 +31,7 @@ from numpyro.distributions.transforms import (
     UnpackTransform,
     biject_to
 )
-from numpyro.distributions.util import cholesky_inverse, sum_rightmost
+from numpyro.distributions.util import cholesky_of_inverse, sum_rightmost
 from numpyro.handlers import seed, substitute
 from numpyro.infer.elbo import ELBO
 from numpyro.infer.util import constrain_fn, find_valid_initial_params, init_to_uniform, log_density, transform_fn
@@ -136,9 +140,10 @@ class AutoContinuous(AutoGuide):
     def _setup_prototype(self, *args, **kwargs):
         super(AutoContinuous, self)._setup_prototype(*args, **kwargs)
         rng_key = numpyro.sample("_{}_rng_key_init".format(self.prefix), dist.PRNGIdentity())
-        init_params, _ = handlers.block(find_valid_initial_params)(rng_key, self.model, *args,
+        init_params, _ = handlers.block(find_valid_initial_params)(rng_key, self.model,
                                                                    init_strategy=self.init_strategy,
-                                                                   **kwargs)
+                                                                   model_args=args,
+                                                                   model_kwargs=kwargs)
         self._inv_transforms = {}
         self._has_transformed_dist = False
         unconstrained_sites = {}
@@ -301,9 +306,16 @@ class AutoDiagonalNormal(AutoContinuous):
         guide = AutoDiagonalNormal(model, ...)
         svi = SVI(model, guide, ...)
     """
+    def __init__(self, model, prefix="auto", init_strategy=init_to_uniform(), init_scale=0.1):
+        if init_scale <= 0:
+            raise ValueError("Expected init_scale > 0. but got {}".format(init_scale))
+        self._init_scale = init_scale
+        super().__init__(model, prefix, init_strategy)
+
     def _get_transform(self):
         loc = numpyro.param('{}_loc'.format(self.prefix), self._init_latent)
-        scale = numpyro.param('{}_scale'.format(self.prefix), np.ones(self.latent_size),
+        scale = numpyro.param('{}_scale'.format(self.prefix),
+                              np.full(self.latent_size, self._init_scale),
                               constraint=constraints.positive)
         return AffineTransform(loc, scale, domain=constraints.real_vector)
 
@@ -329,9 +341,16 @@ class AutoMultivariateNormal(AutoContinuous):
         guide = AutoMultivariateNormal(model, ...)
         svi = SVI(model, guide, ...)
     """
+    def __init__(self, model, prefix="auto", init_strategy=init_to_uniform(), init_scale=0.1):
+        if init_scale <= 0:
+            raise ValueError("Expected init_scale > 0. but got {}".format(init_scale))
+        self._init_scale = init_scale
+        super().__init__(model, prefix, init_strategy)
+
     def _get_transform(self):
         loc = numpyro.param('{}_loc'.format(self.prefix), self._init_latent)
-        scale_tril = numpyro.param('{}_scale_tril'.format(self.prefix), np.identity(self.latent_size),
+        scale_tril = numpyro.param('{}_scale_tril'.format(self.prefix),
+                                   np.identity(self.latent_size) * self._init_scale,
                                    constraint=constraints.lower_cholesky)
         return MultivariateAffineTransform(loc, scale_tril)
 
@@ -341,6 +360,68 @@ class AutoMultivariateNormal(AutoContinuous):
 
     def quantiles(self, params, quantiles):
         transform = handlers.substitute(self._get_transform, params)()
+        quantiles = np.array(quantiles)[..., None]
+        latent = dist.Normal(transform.loc, np.diagonal(transform.scale_tril)).icdf(quantiles)
+        return self._unpack_and_constrain(latent, params)
+
+
+class AutoLowRankMultivariateNormal(AutoContinuous):
+    """
+    This implementation of :class:`AutoContinuous` uses a LowRankMultivariateNormal
+    distribution to construct a guide over the entire latent space.
+    The guide does not depend on the model's ``*args, **kwargs``.
+
+    Usage::
+
+        guide = AutoLowRankMultivariateNormal(model, rank=2, ...)
+        svi = SVI(model, guide, ...)
+    """
+    def __init__(self, model, prefix="auto", init_strategy=init_to_uniform(), init_scale=0.1, rank=None):
+        if init_scale <= 0:
+            raise ValueError("Expected init_scale > 0. but got {}".format(init_scale))
+        self._init_scale = init_scale
+        self.rank = rank
+        super(AutoLowRankMultivariateNormal, self).__init__(
+            model, prefix=prefix, init_strategy=init_strategy)
+
+    def _sample_latent(self, base_dist, *args, **kwargs):
+        sample_shape = kwargs.pop('sample_shape', ())
+        rank = int(round(self.latent_size ** 0.5)) if self.rank is None else self.rank
+        loc = numpyro.param('{}_loc'.format(self.prefix), self._init_latent)
+        cov_factor = numpyro.param('{}_cov_factor'.format(self.prefix), np.zeros((self.latent_size, rank)))
+        scale = numpyro.param('{}_scale'.format(self.prefix),
+                              np.full(self.latent_size, self._init_scale),
+                              constraint=constraints.positive)
+        cov_diag = scale * scale
+        cov_factor = cov_factor * scale[..., None]
+        posterior = dist.LowRankMultivariateNormal(loc, cov_factor, cov_diag)
+        return numpyro.sample("_{}_latent".format(self.prefix), posterior, sample_shape=sample_shape)
+
+    def _get_transform(self, params):
+        loc = params['{}_loc'.format(self.prefix)]
+        cov_factor = params['{}_cov_factor'.format(self.prefix)]
+        scale = params['{}_scale'.format(self.prefix)]
+        cov_diag = scale * scale
+        cov_factor = cov_factor * scale[..., None]
+        scale_tril = dist.LowRankMultivariateNormal(loc, cov_factor, cov_diag).scale_tril
+        return MultivariateAffineTransform(loc, scale_tril)
+
+    def sample_posterior(self, rng_key, params, sample_shape=()):
+        transform = self._get_transform(params)
+        loc, scale_tril = transform.loc, transform.scale_tril
+        latent_sample = dist.MultivariateNormal(loc, scale_tril=scale_tril).sample(rng_key, sample_shape)
+        return self._unpack_and_constrain(latent_sample, params)
+
+    def get_transform(self, params):
+        return ComposeTransform([self._get_transform(params),
+                                 UnpackTransform(self._unpack_latent)])
+
+    def median(self, params):
+        loc = params['{}_loc'.format(self.prefix)]
+        return self._unpack_and_constrain(loc, params)
+
+    def quantiles(self, params, quantiles):
+        transform = self._get_transform(params)
         quantiles = np.array(quantiles)[..., None]
         latent = dist.Normal(transform.loc, np.diagonal(transform.scale_tril)).icdf(quantiles)
         return self._unpack_and_constrain(latent, params)
@@ -377,7 +458,7 @@ class AutoLaplaceApproximation(AutoContinuous):
 
         loc = params['{}_loc'.format(self.prefix)]
         precision = hessian(loss_fn)(loc)
-        scale_tril = cholesky_inverse(precision)
+        scale_tril = cholesky_of_inverse(precision)
         if not_jax_tracer(scale_tril):
             if np.any(np.isnan(scale_tril)):
                 warnings.warn("Hessian of log posterior at the MAP point is singular. Posterior"
@@ -411,7 +492,7 @@ class AutoIAFNormal(AutoContinuous):
     """
     This implementation of :class:`AutoContinuous` uses a Diagonal Normal
     distribution transformed via a
-    :class:`~numpyro.distributions.iaf.InverseAutoregressiveTransform`
+    :class:`~numpyro.distributions.flows.InverseAutoregressiveTransform`
     to construct a guide over the entire latent space. The guide does not
     depend on the model's ``*args, **kwargs``.
 
@@ -460,6 +541,54 @@ class AutoIAFNormal(AutoContinuous):
                                    nonlinearity=self._nonlinearity)
             arnn = numpyro.module('{}_arn__{}'.format(self.prefix, i), arn, (self.latent_size,))
             flows.append(InverseAutoregressiveTransform(arnn))
+        return ComposeTransform(flows)
+
+
+class AutoBNAFNormal(AutoContinuous):
+    """
+    This implementation of :class:`AutoContinuous` uses a Diagonal Normal
+    distribution transformed via a
+    :class:`~numpyro.distributions.flows.BlockNeuralAutoregressiveTransform`
+    to construct a guide over the entire latent space. The guide does not
+    depend on the model's ``*args, **kwargs``.
+
+    Usage::
+
+        guide = AutoBNAFNormal(rng, model, get_params, num_flows=1, hidden_factors=[50, 50])
+        svi = SVI(model, guide, ...)
+
+    **References**
+
+    1. *Block Neural Autoregressive Flow*,
+       Nicola De Cao, Ivan Titov, Wilker Aziz
+
+    :param jax.random.PRNGKey rng: random key to be used as the source of randomness
+        to initialize the guide.
+    :param callable model: a generative model.
+    :param str prefix: a prefix that will be prefixed to all param internal sites.
+    :param callable init_strategy: A per-site initialization function.
+    :param int num_flows: the number of flows to be used, defaults to 3.
+    :param list hidden_factors: Hidden layer i has ``hidden_factors[i]`` hidden units per
+        input dimension. This corresponds to both :math:`a` and :math:`b` in reference [1].
+        The elements of hidden_factors must be integers.
+    """
+    def __init__(self, model, prefix="auto", init_strategy=init_to_uniform(), num_flows=1,
+                 hidden_factors=[8, 8]):
+        self.num_flows = num_flows
+        self._hidden_factors = hidden_factors
+        super(AutoBNAFNormal, self).__init__(model, prefix=prefix, init_strategy=init_strategy)
+
+    def _get_transform(self):
+        if self.latent_size == 1:
+            raise ValueError('latent dim = 1. Consider using AutoDiagonalNormal instead')
+        flows = []
+        for i in range(self.num_flows):
+            if i > 0:
+                flows.append(PermuteTransform(np.arange(self.latent_size)[::-1]))
+            residual = "gated" if i < (self.num_flows - 1) else None
+            arn = BlockNeuralAutoregressiveNN(self.latent_size, self._hidden_factors, residual)
+            arnn = numpyro.module('{}_arn__{}'.format(self.prefix, i), arn, (self.latent_size,))
+            flows.append(BlockNeuralAutoregressiveTransform(arnn))
         return ComposeTransform(flows)
 
 

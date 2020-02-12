@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Generalized Linear Mixed Models
 ===============================
@@ -106,7 +109,7 @@ def main(args):
     dept, male, applications, admit = fetch_train()
     rng_key, rng_key_predict = random.split(random.PRNGKey(1))
     zs = run_inference(dept, male, applications, admit, rng_key, args)
-    pred_probs = Predictive(glmm, zs).get_samples(rng_key_predict, dept, male, applications)['probs']
+    pred_probs = Predictive(glmm, zs)(rng_key_predict, dept, male, applications)['probs']
     header = '=' * 30 + 'glmm - TRAIN' + '=' * 30
     print_results(header, pred_probs, dept, male, admit / applications)
 
@@ -126,7 +129,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    assert numpyro.__version__.startswith('0.2.1')
+    assert numpyro.__version__.startswith('0.2.4')
     parser = argparse.ArgumentParser(description='UCBadmit gender discrimination using HMC')
     parser.add_argument('-n', '--num-samples', nargs='?', default=2000, type=int)
     parser.add_argument('--num-warmup', nargs='?', default=500, type=int)

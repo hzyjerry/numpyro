@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Baseball
 ========
@@ -138,7 +141,7 @@ def run_inference(model, at_bats, hits, rng_key, args):
 
 def predict(model, at_bats, hits, z, rng_key, player_names, train=True):
     header = model.__name__ + (' - TRAIN' if train else ' - TEST')
-    predictions = Predictive(model, posterior_samples=z).get_samples(rng_key, at_bats)['obs']
+    predictions = Predictive(model, posterior_samples=z)(rng_key, at_bats)['obs']
     print_results('=' * 30 + header + '=' * 30,
                   predictions,
                   player_names,
@@ -182,7 +185,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    assert numpyro.__version__.startswith('0.2.1')
+    assert numpyro.__version__.startswith('0.2.4')
     parser = argparse.ArgumentParser(description="Baseball batting average using HMC")
     parser.add_argument("-n", "--num-samples", nargs="?", default=3000, type=int)
     parser.add_argument("--num-warmup", nargs='?', default=1500, type=int)

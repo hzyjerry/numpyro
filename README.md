@@ -3,7 +3,7 @@
 [![Latest Version](https://badge.fury.io/py/numpyro.svg)](https://pypi.python.org/pypi/numpyro)
 # NumPyro
 
-Probabilistic programming with NumPy powered by [JAX](https://github.com/google/jax) for autograd and JIT compilation to GPU/CPU.
+Probabilistic programming with NumPy powered by [JAX](https://github.com/google/jax) for autograd and JIT compilation to GPU/TPU/CPU.
 
 [Docs](https://num.pyro.ai) | [Examples](https://pyro.ai/numpyro/) | [Forum](https://forum.pyro.ai/)
 
@@ -163,6 +163,8 @@ pip install numpyro
 
 To use NumPyro on the GPU, you will need to first [install](https://github.com/google/jax#installation) `jax` and `jaxlib` with CUDA support.
 
+To run NumPyro on Cloud TPUs, you can use pip to install NumPyro as above and setup the TPU backend as detailed [here](https://github.com/google/jax/tree/master/cloud_tpu_colabs).
+
 You can also install NumPyro from source:
 
 ```
@@ -225,3 +227,31 @@ In the near term, we plan to work on the following. Please open new issues for f
  - More inference algorithms, particularly those that require second order derivaties or use HMC.
  - Integration with [Funsor](https://github.com/pyro-ppl/funsor) to support inference algorithms with delayed sampling.
  - Other areas motivated by Pyro's research goals and application focus, and interest from the community.
+ 
+ ## Citing NumPyro
+ 
+The motivating ideas behind NumPyro and a description of Iterative NUTS can be found in this [paper](https://arxiv.org/abs/1912.11554) that appeared in NeurIPS 2019 Program Transformations for Machine Learning Workshop. 
+
+If you use NumPyro, please consider citing:
+
+```
+@article{phan2019composable,
+  title={Composable Effects for Flexible and Accelerated Probabilistic Programming in NumPyro},
+  author={Phan, Du and Pradhan, Neeraj and Jankowiak, Martin},
+  journal={arXiv preprint arXiv:1912.11554},
+  year={2019}
+}
+```
+
+as well as
+
+```
+@article{bingham2018pyro,
+  author = {Bingham, Eli and Chen, Jonathan P. and Jankowiak, Martin and Obermeyer, Fritz and
+            Pradhan, Neeraj and Karaletsos, Theofanis and Singh, Rohit and Szerlip, Paul and
+            Horsfall, Paul and Goodman, Noah D.},
+  title = {{Pyro: Deep Universal Probabilistic Programming}},
+  journal = {arXiv preprint arXiv:1810.09538},
+  year = {2018}
+}
+```

@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 from functools import partial
 import warnings
 
@@ -32,11 +35,12 @@ __all__ = [
 
 def log_density(model, model_args, model_kwargs, params, skip_dist_transforms=False):
     """
-    Computes log of joint density for the model given latent values ``params``.
+    (EXPERIMENTAL INTERFACE) Computes log of joint density for the model given
+    latent values ``params``.
 
     :param model: Python callable containing NumPyro primitives.
     :param tuple model_args: args provided to the model.
-    :param dict model_kwargs`: kwargs provided to the model.
+    :param dict model_kwargs: kwargs provided to the model.
     :param dict params: dictionary of current parameter values keyed by site
         name.
     :param bool skip_dist_transforms: whether to compute log probability of a site
@@ -60,6 +64,11 @@ def log_density(model, model_args, model_kwargs, params, skip_dist_transforms=Fa
         if site['type'] == 'sample':
             value = site['value']
             intermediates = site['intermediates']
+            mask = site['mask']
+            scale = site['scale']
+            # Early exit when all elements are masked
+            if not_jax_tracer(mask) and mask is not None and not np.any(mask):
+                return jax.device_put(0.), model_trace
             if intermediates:
                 if skip_dist_transforms:
                     log_prob = site['fn'].base_dist.log_prob(intermediates[0][0])
@@ -67,17 +76,28 @@ def log_density(model, model_args, model_kwargs, params, skip_dist_transforms=Fa
                     log_prob = site['fn'].log_prob(value, intermediates)
             else:
                 log_prob = site['fn'].log_prob(value)
+
+            # Minor optimizations
+            # XXX: note that this may not work correctly for dynamic masks, provide
+            # explicit jax.DeviceArray for masking.
+            if mask is not None:
+                if scale is not None:
+                    log_prob = np.where(mask, scale * log_prob, 0.)
+                else:
+                    log_prob = np.where(mask, log_prob, 0.)
+            else:
+                if scale is not None:
+                    log_prob = scale * log_prob
             log_prob = np.sum(log_prob)
-            if 'scale' in site:
-                log_prob = site['scale'] * log_prob
             log_joint = log_joint + log_prob
     return log_joint, model_trace
 
 
 def transform_fn(transforms, params, invert=False):
     """
-    Callable that applies a transformation from the `transforms` dict to values in the
-    `params` dict and returns the transformed values keyed on the same names.
+    (EXPERIMENTAL INTERFACE) Callable that applies a transformation from the `transforms`
+    dict to values in the `params` dict and returns the transformed values keyed on
+    the same names.
 
     :param transforms: Dictionary of transforms keyed by names. Names in
         `transforms` and `params` should align.
@@ -91,41 +111,45 @@ def transform_fn(transforms, params, invert=False):
             for k, v in params.items()}
 
 
-def constrain_fn(model, transforms, model_args, model_kwargs, params):
+def constrain_fn(model, transforms, model_args, model_kwargs, params, return_deterministic=False):
     """
-    Gets value at each latent site in `model` given unconstrained parameters `params`.
-    The `transforms` is used to transform these unconstrained parameters to base values
-    of the corresponding priors in `model`. If a prior is a transformed distribution,
-    the corresponding base value lies in the support of base distribution. Otherwise,
-    the base value lies in the support of the distribution.
+    (EXPERIMENTAL INTERFACE) Gets value at each latent site in `model` given
+    unconstrained parameters `params`. The `transforms` is used to transform these
+    unconstrained parameters to base values of the corresponding priors in `model`.
+    If a prior is a transformed distribution, the corresponding base value lies in
+    the support of base distribution. Otherwise, the base value lies in the support
+    of the distribution.
 
     :param model: a callable containing NumPyro primitives.
-    :param tuple model_args: args provided to the model.
-    :param dict model_kwargs: kwargs provided to the model.
     :param dict transforms: dictionary of transforms keyed by names. Names in
         `transforms` and `params` should align.
+    :param tuple model_args: args provided to the model.
+    :param dict model_kwargs: kwargs provided to the model.
     :param dict params: dictionary of unconstrained values keyed by site
         names.
+    :param bool return_deterministic: whether to return the value of `deterministic`
+        sites from the model. Defaults to `False`.
     :return: `dict` of transformed params.
     """
     params_constrained = transform_fn(transforms, params)
     substituted_model = substitute(model, base_param_map=params_constrained)
     model_trace = trace(substituted_model).get_trace(*model_args, **model_kwargs)
-    return {k: model_trace[k]['value'] for k, v in params.items() if k in model_trace}
+    return {k: v['value'] for k, v in model_trace.items() if (k in params) or
+            (return_deterministic and v['type'] == 'deterministic')}
 
 
 def potential_energy(model, inv_transforms, model_args, model_kwargs, params):
     """
-    Computes potential energy of a model given unconstrained params.
+    (EXPERIMENTAL INTERFACE) Computes potential energy of a model given unconstrained params.
     The `inv_transforms` is used to transform these unconstrained parameters to base values
     of the corresponding priors in `model`. If a prior is a transformed distribution,
     the corresponding base value lies in the support of base distribution. Otherwise,
     the base value lies in the support of the distribution.
 
     :param model: a callable containing NumPyro primitives.
-    :param tuple model_args: args provided to the model.
-    :param dict model_kwargs`: kwargs provided to the model.
     :param dict inv_transforms: dictionary of transforms keyed by names.
+    :param tuple model_args: args provided to the model.
+    :param dict model_kwargs: kwargs provided to the model.
     :param dict params: unconstrained parameters of `model`.
     :return: potential energy given unconstrained parameters.
     """
@@ -134,7 +158,7 @@ def potential_energy(model, inv_transforms, model_args, model_kwargs, params):
                                          skip_dist_transforms=True)
     for name, t in inv_transforms.items():
         t_log_det = np.sum(t.log_abs_det_jacobian(params[name], params_constrained[name]))
-        if 'scale' in model_trace[name]:
+        if model_trace[name]['scale'] is not None:
             t_log_det = model_trace[name]['scale'] * t_log_det
         log_joint = log_joint + t_log_det
     return - log_joint
@@ -268,8 +292,11 @@ def init_to_value(values):
     return partial(_init_to_value, values=values)
 
 
-def find_valid_initial_params(rng_key, model, *model_args, init_strategy=init_to_uniform(),
-                              param_as_improper=False, **model_kwargs):
+def find_valid_initial_params(rng_key, model,
+                              init_strategy=init_to_uniform(),
+                              param_as_improper=False,
+                              model_args=(),
+                              model_kwargs=None):
     """
     (EXPERIMENTAL INTERFACE) Given a model with Pyro primitives, returns an initial
     valid unconstrained value for all the parameters. This function also returns an
@@ -281,11 +308,11 @@ def find_valid_initial_params(rng_key, model, *model_args, init_strategy=init_to
         sample from the prior. The returned `init_params` will have the
         batch shape ``rng_key.shape[:-1]``.
     :param model: Python callable containing Pyro primitives.
-    :param `*model_args`: args provided to the model.
     :param callable init_strategy: a per-site initialization function.
     :param bool param_as_improper: a flag to decide whether to consider sites with
         `param` statement as sites with improper priors.
-    :param `**model_kwargs`: kwargs provided to the model.
+    :param tuple model_args: args provided to the model.
+    :param dict model_kwargs: kwargs provided to the model.
     :return: tuple of (`init_params`, `is_valid`).
     """
     init_strategy = jax.partial(init_strategy, skip_param=not param_as_improper)
@@ -348,6 +375,34 @@ def find_valid_initial_params(rng_key, model, *model_args, init_strategy=init_to
     return init_params, is_valid
 
 
+def get_model_transforms(rng_key, model, model_args=(), model_kwargs=None):
+    model_kwargs = {} if model_kwargs is None else model_kwargs
+    seeded_model = seed(model, rng_key if rng_key.ndim == 1 else rng_key[0])
+    model_trace = trace(seeded_model).get_trace(*model_args, **model_kwargs)
+    inv_transforms = {}
+    # model code may need to be replayed in the presence of dynamic constraints
+    # or deterministic sites
+    replay_model = False
+    for k, v in model_trace.items():
+        if v['type'] == 'sample' and not v['is_observed']:
+            if v['intermediates']:
+                inv_transforms[k] = biject_to(v['fn'].base_dist.support)
+                replay_model = True
+            else:
+                inv_transforms[k] = biject_to(v['fn'].support)
+        elif v['type'] == 'param':
+            constraint = v['kwargs'].pop('constraint', real)
+            transform = biject_to(constraint)
+            if isinstance(transform, ComposeTransform):
+                inv_transforms[k] = transform.parts[0]
+                replay_model = True
+            else:
+                inv_transforms[k] = transform
+        elif v['type'] == 'deterministic':
+            replay_model = True
+    return inv_transforms, replay_model
+
+
 def get_potential_fn(rng_key, model, dynamic_args=False, model_args=(), model_kwargs=None):
     """
     (EXPERIMENTAL INTERFACE) Given a model with Pyro primitives, returns a
@@ -366,52 +421,40 @@ def get_potential_fn(rng_key, model, dynamic_args=False, model_args=(), model_kw
         `potential_fn` and `constraints_fn` callables, respectively.
     :param tuple model_args: args provided to the model.
     :param dict model_kwargs: kwargs provided to the model.
-    :return: tuple of (`potential_fn`, `constrain_fn`). The latter is used
+    :return: tuple of (`potential_fn`, `postprocess_fn`). The latter is used
         to constrain unconstrained samples (e.g. those returned by HMC)
-        to values that lie within the site's support.
+        to values that lie within the site's support, and return values at
+        `deterministic` sites in the model.
     """
-    model_kwargs = {} if model_kwargs is None else model_kwargs
-    seeded_model = seed(model, rng_key if rng_key.ndim == 1 else rng_key[0])
-    model_trace = trace(seeded_model).get_trace(*model_args, **model_kwargs)
-    inv_transforms = {}
-    has_transformed_dist = False
-    for k, v in model_trace.items():
-        if v['type'] == 'sample' and not v['is_observed']:
-            if v['intermediates']:
-                inv_transforms[k] = biject_to(v['fn'].base_dist.support)
-                has_transformed_dist = True
-            else:
-                inv_transforms[k] = biject_to(v['fn'].support)
-        elif v['type'] == 'param':
-            constraint = v['kwargs'].pop('constraint', real)
-            transform = biject_to(constraint)
-            if isinstance(transform, ComposeTransform):
-                inv_transforms[k] = transform.parts[0]
-                has_transformed_dist = True
-            else:
-                inv_transforms[k] = transform
-
     if dynamic_args:
         def potential_fn(*args, **kwargs):
+            inv_transforms, replay_model = get_model_transforms(rng_key, model, args, kwargs)
             return jax.partial(potential_energy, model, inv_transforms, args, kwargs)
-        if has_transformed_dist:
-            def constrain_fun(*args, **kwargs):
-                return jax.partial(constrain_fn, model, inv_transforms, args, kwargs)
-        else:
-            def constrain_fun(*args, **kwargs):
+
+        def postprocess_fn(*args, **kwargs):
+            inv_transforms, replay_model = get_model_transforms(rng_key, model, args, kwargs)
+            if replay_model:
+                return jax.partial(constrain_fn, model, inv_transforms, args, kwargs,
+                                   return_deterministic=True)
+            else:
                 return jax.partial(transform_fn, inv_transforms)
     else:
+        inv_transforms, replay_model = get_model_transforms(rng_key, model, model_args, model_kwargs)
         potential_fn = jax.partial(potential_energy, model, inv_transforms, model_args, model_kwargs)
-        if has_transformed_dist:
-            constrain_fun = jax.partial(constrain_fn, model, inv_transforms, model_args, model_kwargs)
+        if replay_model:
+            postprocess_fn = jax.partial(constrain_fn, model, inv_transforms, model_args, model_kwargs,
+                                         return_deterministic=True)
         else:
-            constrain_fun = jax.partial(transform_fn, inv_transforms)
+            postprocess_fn = jax.partial(transform_fn, inv_transforms)
 
-    return potential_fn, constrain_fun
+    return potential_fn, postprocess_fn
 
 
-def initialize_model(rng_key, model, *model_args, init_strategy=init_to_uniform(),
-                     dynamic_args=False, **model_kwargs):
+def initialize_model(rng_key, model,
+                     init_strategy=init_to_uniform(),
+                     dynamic_args=False,
+                     model_args=(),
+                     model_kwargs=None):
     """
     (EXPERIMENTAL INTERFACE) Helper function that calls :func:`~numpyro.infer.util.get_potential_fn`
     and :func:`~numpyro.infer.util.find_valid_initial_params` under the hood
@@ -421,35 +464,39 @@ def initialize_model(rng_key, model, *model_args, init_strategy=init_to_uniform(
         sample from the prior. The returned `init_params` will have the
         batch shape ``rng_key.shape[:-1]``.
     :param model: Python callable containing Pyro primitives.
-    :param `*model_args`: args provided to the model.
     :param callable init_strategy: a per-site initialization function.
         See :ref:`init_strategy` section for available functions.
     :param bool dynamic_args: if `True`, the `potential_fn` and
         `constraints_fn` are themselves dependent on model arguments.
         When provided a `*model_args, **model_kwargs`, they return
         `potential_fn` and `constraints_fn` callables, respectively.
-    :param `**model_kwargs`: kwargs provided to the model.
-    :return: tuple of (`init_params`, `potential_fn`, `constrain_fn`),
+    :param tuple model_args: args provided to the model.
+    :param dict model_kwargs: kwargs provided to the model.
+    :return: tuple of (`init_params`, `potential_fn`, `postprocess_fn`),
         `init_params` are values from the prior used to initiate MCMC,
-        `constrain_fn` is a callable that uses inverse transforms
+        `postprocess_fn` is a callable that uses inverse transforms
         to convert unconstrained HMC samples to constrained values that
-        lie within the site's support.
+        lie within the site's support, in addition to returning values
+        at `deterministic` sites in the model.
     """
-    potential_fun, constrain_fun = get_potential_fn(rng_key if rng_key.ndim == 1 else rng_key[0],
+    if model_kwargs is None:
+        model_kwargs = {}
+    potential_fn, postprocess_fn = get_potential_fn(rng_key if rng_key.ndim == 1 else rng_key[0],
                                                     model,
                                                     dynamic_args=dynamic_args,
                                                     model_args=model_args,
                                                     model_kwargs=model_kwargs)
 
-    init_params, is_valid = find_valid_initial_params(rng_key, model, *model_args,
+    init_params, is_valid = find_valid_initial_params(rng_key, model,
                                                       init_strategy=init_strategy,
                                                       param_as_improper=True,
-                                                      **model_kwargs)
+                                                      model_args=model_args,
+                                                      model_kwargs=model_kwargs)
 
     if not_jax_tracer(is_valid):
         if device_get(~np.all(is_valid)):
             raise RuntimeError("Cannot find valid initial parameters. Please check your model again.")
-    return init_params, potential_fun, constrain_fun
+    return init_params, potential_fn, postprocess_fn
 
 
 def _predictive(rng_key, model, posterior_samples, num_samples, return_sites=None,
@@ -467,7 +514,7 @@ def _predictive(rng_key, model, posterior_samples, num_samples, return_sites=Non
                 sites = return_sites
         else:
             sites = {k for k, site in model_trace.items()
-                     if site['type'] != 'plate' and k not in samples}
+                     if (site['type'] == 'sample' and k not in samples) or (site['type'] == 'deterministic')}
         return {name: site['value'] for name, site in model_trace.items() if name in sites}
 
     if parallel:
@@ -527,7 +574,7 @@ class Predictive(object):
         self.return_sites = return_sites
         self.parallel = parallel
 
-    def get_samples(self, rng_key, *args, **kwargs):
+    def __call__(self, rng_key, *args, **kwargs):
         """
         Returns dict of samples from the predictive distribution. By default, only sample sites not
         contained in `posterior_samples` are returned. This can be modified by changing the
@@ -550,14 +597,16 @@ class Predictive(object):
                            return_sites=self.return_sites, parallel=self.parallel,
                            model_args=args, model_kwargs=kwargs)
 
+    def get_samples(self, rng_key, *args, **kwargs):
+        warnings.warn("The method `.get_samples` has been deprecated in favor of `.__call__`.",
+                      DeprecationWarning)
+        return self.__call__(rng_key, *args, **kwargs)
+
 
 def log_likelihood(model, posterior_samples, *args, **kwargs):
     """
-    Returns log likelihood at observation nodes of model, given samples of all latent variables.
-
-    .. warning::
-        The interface for the `log_likelihood` function is experimental, and
-        might change in the future.
+    (EXPERIMENTAL INTERFACE) Returns log likelihood at observation nodes of model,
+    given samples of all latent variables.
 
     :param model: Python callable containing Pyro primitives.
     :param dict posterior_samples: dictionary of samples from the posterior.

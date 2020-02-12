@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 from jax import random, vmap
 from jax.lax import stop_gradient
 import jax.numpy as np
@@ -54,10 +57,8 @@ class ELBO(object):
             seeded_model = seed(model, model_seed)
             seeded_guide = seed(guide, guide_seed)
             guide_log_density, guide_trace = log_density(seeded_guide, args, kwargs, param_map)
-            # NB: we only want to substitute params not available in guide_trace
-            model_param_map = {k: v for k, v in param_map.items() if k not in guide_trace}
             seeded_model = replay(seeded_model, guide_trace)
-            model_log_density, _ = log_density(seeded_model, args, kwargs, model_param_map)
+            model_log_density, _ = log_density(seeded_model, args, kwargs, param_map)
 
             # log p(z) - log q(z)
             elbo = model_log_density - guide_log_density

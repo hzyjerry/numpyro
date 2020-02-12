@@ -1,3 +1,7 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
+import numpy as onp
 from numpy.testing import assert_allclose, assert_raises
 import pytest
 
@@ -10,6 +14,34 @@ from numpyro import handlers
 import numpyro.distributions as dist
 from numpyro.infer.util import log_density
 from numpyro.util import optional
+
+
+@pytest.mark.parametrize('mask_last', [1, 5, 10])
+@pytest.mark.parametrize('use_jit', [False, True])
+def test_mask(mask_last, use_jit):
+    N = 10
+    mask = onp.ones(N, dtype=onp.bool)
+    mask[-mask_last] = 0
+
+    def model(data, mask):
+        with numpyro.plate('N', N):
+            x = numpyro.sample('x', dist.Normal(0, 1))
+            with handlers.mask(mask_array=mask):
+                numpyro.sample('y', dist.Delta(x, log_density=1.))
+                with handlers.scale(scale_factor=2):
+                    numpyro.sample('obs', dist.Normal(x, 1), obs=data)
+
+    data = random.normal(random.PRNGKey(0), (N,))
+    x = random.normal(random.PRNGKey(1), (N,))
+    if use_jit:
+        log_joint = jit(log_density, static_argnums=(0,))(model, (data, mask), {}, {'x': x, 'y': x})[0]
+    else:
+        log_joint = log_density(model, (data, mask), {}, {'x': x, 'y': x})[0]
+    log_prob_x = dist.Normal(0, 1).log_prob(x)
+    log_prob_y = mask
+    log_prob_z = dist.Normal(x, 1).log_prob(data)
+    expected = (log_prob_x + np.where(mask,  log_prob_y + 2 * log_prob_z, 0.)).sum()
+    assert_allclose(log_joint, expected, atol=1e-4)
 
 
 @pytest.mark.parametrize('use_context_manager', [True, False])
@@ -102,6 +134,8 @@ def model_nested_plates_0():
         with numpyro.plate('inner', 5):
             y = numpyro.sample('x', dist.Normal(0., 1.))
             assert y.shape == (5, 10)
+            z = numpyro.deterministic('z', x ** 2)
+            assert z.shape == (10,)
 
 
 def model_nested_plates_1():
@@ -111,6 +145,8 @@ def model_nested_plates_1():
         with numpyro.plate('inner', 5):
             y = numpyro.sample('x', dist.Normal(0., 1.))
             assert y.shape == (10, 5)
+            z = numpyro.deterministic('z', x ** 2)
+            assert z.shape == (10, 1)
 
 
 def model_nested_plates_2():
@@ -122,6 +158,8 @@ def model_nested_plates_2():
     with inner:
         y = numpyro.sample('y', dist.Normal(0., 1.))
         assert y.shape == (5, 1, 1)
+        z = numpyro.deterministic('z', x ** 2)
+        assert z.shape == (10,)
 
     with outer, inner:
         xy = numpyro.sample('xy', dist.Normal(0., 1.), sample_shape=(10,))
@@ -137,6 +175,8 @@ def model_dist_batch_shape():
     with inner:
         y = numpyro.sample('y', dist.Normal(0., np.ones(10)))
         assert y.shape == (5, 1, 10)
+        z = numpyro.deterministic('z', x ** 2)
+        assert z.shape == (10,)
 
     with outer, inner:
         xy = numpyro.sample('xy', dist.Normal(0., np.ones(10)), sample_shape=(10,))
@@ -152,6 +192,8 @@ def model_subsample_1():
     with inner:
         y = numpyro.sample('y', dist.Normal(0., 1.))
         assert y.shape == (5, 1, 1)
+        z = numpyro.deterministic('z', x ** 2)
+        assert z.shape == (10,)
 
     with outer, inner:
         xy = numpyro.sample('xy', dist.Normal(0., 1.))
@@ -168,6 +210,7 @@ def model_subsample_1():
 def test_plate(model):
     trace = handlers.trace(handlers.seed(model, random.PRNGKey(1))).get_trace()
     jit_trace = handlers.trace(jit(handlers.seed(model, random.PRNGKey(1)))).get_trace()
+    assert 'z' in trace
     for name, site in trace.items():
         if site['type'] == 'sample':
             assert_allclose(jit_trace[name]['value'], site['value'])

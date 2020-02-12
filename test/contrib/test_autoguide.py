@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 from functools import partial
 
 from numpy.testing import assert_allclose
@@ -13,7 +16,9 @@ from numpyro.contrib.autoguide import (
     AutoContinuousELBO,
     AutoDiagonalNormal,
     AutoIAFNormal,
+    AutoBNAFNormal,
     AutoLaplaceApproximation,
+    AutoLowRankMultivariateNormal,
     AutoMultivariateNormal
 )
 from numpyro.contrib.nn.auto_reg_nn import AutoregressiveNN
@@ -31,8 +36,10 @@ init_strategy = init_to_median(num_samples=2)
 @pytest.mark.parametrize('auto_class', [
     AutoDiagonalNormal,
     AutoIAFNormal,
+    AutoBNAFNormal,
     AutoMultivariateNormal,
     AutoLaplaceApproximation,
+    AutoLowRankMultivariateNormal,
 ])
 def test_beta_bernoulli(auto_class):
     data = np.array([[1.0] * 8 + [0.0] * 2,
@@ -51,7 +58,7 @@ def test_beta_bernoulli(auto_class):
         svi_state, loss = svi.update(val, data)
         return svi_state
 
-    svi_state = fori_loop(0, 2000, body_fn, svi_state)
+    svi_state = fori_loop(0, 3000, body_fn, svi_state)
     params = svi.get_params(svi_state)
     true_coefs = (np.sum(data, axis=0) + 1) / (data.shape[0] + 2)
     # test .sample_posterior method
@@ -62,8 +69,10 @@ def test_beta_bernoulli(auto_class):
 @pytest.mark.parametrize('auto_class', [
     AutoDiagonalNormal,
     AutoIAFNormal,
+    AutoBNAFNormal,
     AutoMultivariateNormal,
     AutoLaplaceApproximation,
+    AutoLowRankMultivariateNormal,
 ])
 def test_logistic_regression(auto_class):
     N, dim = 3000, 3
@@ -89,7 +98,7 @@ def test_logistic_regression(auto_class):
 
     svi_state = fori_loop(0, 2000, body_fn, svi_state)
     params = svi.get_params(svi_state)
-    if auto_class is not AutoIAFNormal:
+    if auto_class not in (AutoIAFNormal, AutoBNAFNormal):
         median = guide.median(params)
         assert_allclose(median['coefs'], true_coefs, rtol=0.1)
         # test .quantile method
@@ -206,12 +215,13 @@ def test_param():
     assert_allclose(params['a'], a_init)
     assert_allclose(params['b'], b_init)
     assert_allclose(params['auto_loc'], guide._init_latent)
-    assert_allclose(params['auto_scale'], np.ones(1))
+    assert_allclose(params['auto_scale'], np.ones(1) * guide._init_scale)
 
     actual_loss = svi.evaluate(svi_state)
     assert np.isfinite(actual_loss)
-    expected_loss = dist.Normal(guide._init_latent, 1).log_prob(x_init) - dist.Normal(a_init, b_init).log_prob(x_init)
-    assert_allclose(actual_loss, expected_loss)
+    expected_loss = dist.Normal(guide._init_latent, guide._init_scale).log_prob(x_init) \
+        - dist.Normal(a_init, b_init).log_prob(x_init)
+    assert_allclose(actual_loss, expected_loss, rtol=1e-6)
 
 
 def test_dynamic_supports():
@@ -275,13 +285,13 @@ def test_elbo_dynamic_support():
     actual_loss = svi.evaluate(svi_state)
     assert np.isfinite(actual_loss)
 
-    guide_log_prob = dist.Normal(guide._init_latent).log_prob(x_unconstrained).sum()
+    guide_log_prob = dist.Normal(guide._init_latent, guide._init_scale).log_prob(x_unconstrained).sum()
     transfrom = transforms.biject_to(constraints.interval(0, 5))
     x = transfrom(x_unconstrained)
     logdet = transfrom.log_abs_det_jacobian(x_unconstrained, x)
     model_log_prob = x_prior.log_prob(x) + logdet
     expected_loss = guide_log_prob - model_log_prob
-    assert_allclose(actual_loss, expected_loss)
+    assert_allclose(actual_loss, expected_loss, rtol=1e-6)
 
 
 def test_laplace_approximation_warning():

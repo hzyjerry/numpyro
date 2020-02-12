@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Hidden Markov Model
 ===================
@@ -170,17 +173,18 @@ def main(args):
     for i in range(transition_prob.shape[0]):
         for j in range(transition_prob.shape[1]):
             ax.plot(x, gaussian_kde(samples['transition_prob'][:, i, j])(x),
-                    label="transition_prob[{}, {}], true value = {:.2f}"
+                    label="trans_prob[{}, {}], true value = {:.2f}"
                     .format(i, j, transition_prob[i, j]))
     ax.set(xlabel="Probability", ylabel="Frequency",
            title="Transition probability posterior")
+    ax.legend()
 
     plt.savefig("hmm_plot.pdf")
     plt.tight_layout()
 
 
 if __name__ == '__main__':
-    assert numpyro.__version__.startswith('0.2.1')
+    assert numpyro.__version__.startswith('0.2.4')
     parser = argparse.ArgumentParser(description='Semi-supervised Hidden Markov Model')
     parser.add_argument('--num-categories', default=3, type=int)
     parser.add_argument('--num-words', default=10, type=int)

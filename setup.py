@@ -1,3 +1,6 @@
+# Copyright Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import absolute_import, division, print_function
 
 import os
@@ -30,9 +33,9 @@ setup(
     author='Uber AI Labs',
     author_email='npradhan@uber.com',
     install_requires=[
-        # TODO: pin to a specific version for the release (unless JAX's API becomes stable)
-        'jax>=0.1.52',
-        'jaxlib>=0.1.32',
+        # TODO: pin to a specific version for the release (until JAX's API becomes stable)
+        'jax>=0.1.57',
+        'jaxlib>=0.1.37',
         'tqdm',
     ],
     extras_require={
@@ -43,16 +46,17 @@ setup(
             'pyro-api>=0.1.1'
         ],
         'dev': ['ipython', 'isort'],
-        'examples': ['matplotlib'],
+        'examples': ['matplotlib', 'seaborn'],
     },
     long_description=long_description,
     long_description_content_type='text/markdown',
     keywords='probabilistic machine learning bayesian statistics',
+    license='Apache License 2.0',
     classifiers=[
         'Intended Audience :: Developers',
         'Intended Audience :: Education',
         'Intended Audience :: Science/Research',
-        'License :: OSI Approved :: MIT License',
+        'License :: OSI Approved :: Apache Software License',
         'Operating System :: POSIX :: Linux',
         'Operating System :: MacOS :: MacOS X',
         'Programming Language :: Python :: 3.6',
