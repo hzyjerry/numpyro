@@ -124,6 +124,7 @@ CONTINUOUS = [
     T(dist.LogNormal, np.array([0.5, -0.7]), np.array([[0.1, 0.4], [0.5, 0.1]])),
     T(dist.MultivariateNormal, 0., np.array([[1., 0.5], [0.5, 1.]]), None, None),
     T(dist.MultivariateNormal, np.array([1., 3.]), None, np.array([[1., 0.5], [0.5, 1.]]), None),
+    T(dist.MultivariateNormal, np.array([1., 3.]), None, np.array([[[1., 0.5], [0.5, 1.]]]), None),
     T(dist.MultivariateNormal, np.array([2.]), None, None, np.array([[1., 0.], [0.5, 1.]])),
     T(dist.MultivariateNormal, np.arange(6, dtype=np.float32).reshape((3, 2)), None, None,
       np.array([[1., 0.], [0., 1.]])),
@@ -287,6 +288,9 @@ def test_dist_shape(jax_dist, sp_dist, params, prepend_shape):
         sp_dist = sp_dist(*params)
         sp_samples = sp_dist.rvs(size=prepend_shape + jax_dist.batch_shape)
         assert np.shape(sp_samples) == expected_shape
+    if isinstance(jax_dist, dist.MultivariateNormal):
+        assert jax_dist.covariance_matrix.ndim == len(jax_dist.batch_shape) + 2
+        assert_allclose(jax_dist.precision_matrix, np.linalg.inv(jax_dist.covariance_matrix), rtol=1e-6)
 
 
 @pytest.mark.parametrize('batch_shape', [(), (4,), (3, 2)])
@@ -567,7 +571,7 @@ def test_log_prob_gradient(jax_dist, sp_dist, params):
             # grad w.r.t. `value` of Delta distribution will be 0
             # but numerical value will give nan (= inf - inf)
             expected_grad = 0.
-        assert_allclose(np.sum(actual_grad), expected_grad, rtol=0.01, atol=1e-3)
+        assert_allclose(np.sum(actual_grad), expected_grad, rtol=0.01, atol=0.01)
 
 
 @pytest.mark.parametrize('jax_dist, sp_dist, params', CONTINUOUS + DISCRETE)
