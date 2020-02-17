@@ -615,8 +615,10 @@ def log_likelihood(model, posterior_samples, *args, **kwargs):
     :return: dict of log likelihoods at observation sites.
     """
     def single_loglik(samples):
+        print(samples)
         model_trace = trace(substitute(model, samples)).get_trace(*args, **kwargs)
-        return {name: site['fn'].log_prob(site['value']) for name, site in model_trace.items()
-                if site['type'] == 'sample' and site['is_observed']}
+        return {name: site['fn'].log_prob(site['value']) for name, site in model_trace.items() if site['type'] == 'sample' and site['is_observed']}
 
+    #single_loglik(posterior_samples)
+    # model_trace = trace(substitute(model, posterior_samples[0])).get_trace(*args, **kwargs)
     return vmap(single_loglik)(posterior_samples)

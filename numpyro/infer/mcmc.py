@@ -23,6 +23,8 @@ from jax.tree_util import tree_flatten, tree_map, tree_multimap
 from numpyro.diagnostics import print_summary
 import numpyro.distributions as dist
 from numpyro.distributions.util import categorical_logits, cholesky_update
+from numpyro.handlers import block, seed, substitute, trace
+from numpyro.util import not_jax_tracer, while_loop
 from numpyro.infer.hmc_util import (
     IntegratorState,
     build_tree,
@@ -31,7 +33,7 @@ from numpyro.infer.hmc_util import (
     velocity_verlet,
     warmup_adapter
 )
-from numpyro.infer.util import init_to_uniform, get_potential_fn, find_valid_initial_params
+from numpyro.infer.util import init_to_uniform, get_potential_fn, find_valid_initial_params, log_density
 from numpyro.util import cond, copy_docs_from, fori_collect, fori_loop, identity, not_jax_tracer, cached_by
 
 HMCState = namedtuple('HMCState', ['i', 'z', 'z_grad', 'potential_energy', 'energy', 'num_steps', 'accept_prob',
@@ -337,7 +339,6 @@ def hmc(potential_fn=None, potential_fn_gen=None, kinetic_fn=None, algo='NUTS'):
                            lambda args: wa_update(*args),
                            hmc_state.adapt_state,
                            lambda x: x)
-
         itr = hmc_state.i + 1
         n = np.where(hmc_state.i < wa_steps, itr, itr - wa_steps)
         mean_accept_prob = hmc_state.mean_accept_prob + (accept_prob - hmc_state.mean_accept_prob) / n
@@ -514,7 +515,6 @@ class HMC(MCMCKernel):
                 if device_get(~np.all(is_valid)):
                     raise RuntimeError("Cannot find valid initial parameters. "
                                        "Please check your model again.")
-
         hmc_init_fn = lambda init_params, rng_key: self._init_fn(  # noqa: E731
             init_params,
             num_warmup=num_warmup,
@@ -529,6 +529,7 @@ class HMC(MCMCKernel):
             model_args=model_args,
             model_kwargs=model_kwargs,
         )
+
         if rng_key.ndim == 1:
             init_state = hmc_init_fn(init_params, rng_key)
         else:
@@ -931,6 +932,7 @@ def _laxmap(f, xs):
     ys = []
     for i in range(n):
         x = jit(_get_value_from_index)(xs, i)
+        # x = _get_value_from_index(xs, i)
         ys.append(f(x))
 
     return tree_multimap(lambda *args: np.stack(args), *ys)
@@ -1005,7 +1007,8 @@ class MCMC(object):
                  postprocess_fn=None,
                  chain_method='parallel',
                  progress_bar=True,
-                 jit_model_args=False):
+                 jit_model_args=False,
+                 jit_model=True):
         self.sampler = sampler
         self.num_warmup = num_warmup
         self.num_samples = num_samples
@@ -1018,6 +1021,7 @@ class MCMC(object):
                 "CI" in os.environ or "PYTEST_XDIST_WORKER" in os.environ):
             self.progress_bar = False
         self._jit_model_args = jit_model_args
+        self._jit_model = jit_model
         self._states = None
         self._states_flat = None
         # HMCState returned by last run
@@ -1085,7 +1089,8 @@ class MCMC(object):
                                     collection_size=self._collection_params["collection_size"],
                                     progbar_desc=functools.partial(get_progbar_desc_str,
                                                                    lower_idx),
-                                    diagnostics_fn=diagnostics)
+                                    diagnostics_fn=diagnostics,
+                                    jit_model=self._jit_model)
         states, last_val = collect_vals
         # Get first argument of type `HMCState`
         last_state = last_val[0]
@@ -1168,6 +1173,7 @@ class MCMC(object):
         """
         self._args = args
         self._kwargs = kwargs
+
         init_state = self._get_cached_init_state(rng_key, args, kwargs)
         if self.num_chains > 1 and rng_key.ndim == 1:
             rng_key = random.split(rng_key, self.num_chains)

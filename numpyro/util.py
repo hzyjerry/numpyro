@@ -166,7 +166,7 @@ def cached_by(outer_fn, *keys):
 
 
 def fori_collect(lower, upper, body_fun, init_val, transform=identity,
-                 progbar=True, return_last_val=False, collection_size=None, **progbar_opts):
+                 progbar=True, return_last_val=False, collection_size=None, jit_model=True, **progbar_opts):
     """
     This looping construct works like :func:`~jax.lax.fori_loop` but with the additional
     effect of collecting values from the loop body. In addition, this allows for
@@ -220,11 +220,17 @@ def fori_collect(lower, upper, body_fun, init_val, transform=identity,
         vals = (init_val, collection, device_put(lower))
         if upper == 0:
             # special case, only compiling
-            jit(_body_fn)(0, vals)
+            if jit_model:
+                jit(_body_fn)(0, vals)
+            else:
+                _body_fn(0, vals)
         else:
             with tqdm.trange(upper) as t:
                 for i in t:
-                    vals = jit(_body_fn)(i, vals)
+                    if jit_model:
+                        vals = jit(_body_fn)(i, vals)
+                    else:
+                        vals = _body_fn(i, vals)
                     t.set_description(progbar_desc(i), refresh=False)
                     if diagnostics_fn:
                         t.set_postfix_str(diagnostics_fn(vals[0]), refresh=False)
