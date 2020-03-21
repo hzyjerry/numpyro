@@ -1068,7 +1068,7 @@ class MCMC(object):
         except TypeError:
             return None
 
-    def _single_chain_mcmc(self, rng_key, init_state, init_params, args, kwargs, collect_fields=('z',)):
+    def _single_chain_mcmc(self, rng_key, init_state, init_params, args, kwargs, collect_fields=('z',), tqdm_position=0):
         if init_state is None:
             init_state = self.sampler.init(rng_key, self.num_warmup, init_params,
                                            model_args=args, model_kwargs=kwargs)
@@ -1090,7 +1090,8 @@ class MCMC(object):
                                     progbar_desc=functools.partial(get_progbar_desc_str,
                                                                    lower_idx),
                                     diagnostics_fn=diagnostics,
-                                    jit_model=self._jit_model)
+                                    jit_model=self._jit_model,
+                                    tqdm_position=tqdm_position)
         states, last_val = collect_vals
         # Get first argument of type `HMCState`
         last_state = last_val[0]
@@ -1103,11 +1104,11 @@ class MCMC(object):
             states['z'] = lax.map(self.postprocess_fn, states['z'])
         return states, last_state
 
-    def _single_chain_jit_args(self, init, collect_fields=('z',)):
-        return self._single_chain_mcmc(*init, collect_fields=collect_fields)
+    def _single_chain_jit_args(self, init, collect_fields=('z',), tqdm_position=0):
+        return self._single_chain_mcmc(*init, collect_fields=collect_fields, tqdm_position=tqdm_position)
 
-    def _single_chain_nojit_args(self, init, model_args, model_kwargs, collect_fields=('z',)):
-        return self._single_chain_mcmc(*init, model_args, model_kwargs, collect_fields=collect_fields)
+    def _single_chain_nojit_args(self, init, model_args, model_kwargs, collect_fields=('z',), tqdm_position=0):
+        return self._single_chain_mcmc(*init, model_args, model_kwargs, collect_fields=collect_fields, tqdm_position=tqdm_position)
 
     def _set_collection_params(self, lower=None, upper=None, collection_size=None):
         self._collection_params["lower"] = self.num_warmup if lower is None else lower
@@ -1154,7 +1155,7 @@ class MCMC(object):
         self.run(rng_key, *args, extra_fields=extra_fields, init_params=init_params, **kwargs)
         self._warmup_state = self._last_state
 
-    def run(self, rng_key, *args, extra_fields=(), init_params=None, **kwargs):
+    def run(self, rng_key, *args, extra_fields=(), init_params=None, tqdm_position=0, **kwargs):
         """
         Run the MCMC samplers and collect samples.
 
@@ -1200,17 +1201,19 @@ class MCMC(object):
         collect_fields = tuple(set(('z', 'diverging') + tuple(extra_fields)))
         if self.num_chains == 1:
             states_flat, last_state = self._single_chain_mcmc(rng_key, init_state, init_params,
-                                                              args, kwargs, collect_fields)
+                                                              args, kwargs, collect_fields, tqdm_position=tqdm_position)
             states = tree_map(lambda x: x[np.newaxis, ...], states_flat)
         else:
             if self._jit_model_args:
                 partial_map_fn = partial(self._single_chain_jit_args,
-                                         collect_fields=collect_fields)
+                                         collect_fields=collect_fields,
+                                         tqdm_position=tqdm_position)
             else:
                 partial_map_fn = partial(self._single_chain_nojit_args,
                                          model_args=args,
                                          model_kwargs=kwargs,
-                                         collect_fields=collect_fields)
+                                         collect_fields=collect_fields,
+                                         tqdm_position=tqdm_position)
             if chain_method == 'sequential':
                 if self.progress_bar:
                     map_fn = partial(_laxmap, partial_map_fn)
