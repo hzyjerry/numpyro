@@ -19,9 +19,33 @@ condition
     :show-inheritance:
     :member-order: bysource
 
+do
+--
+.. autoclass:: numpyro.handlers.do
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+lift
+----
+.. autoclass:: numpyro.handlers.lift
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 mask
 ----
 .. autoclass:: numpyro.handlers.mask
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+reparam
+-------
+.. autoclass:: numpyro.handlers.reparam
     :members:
     :undoc-members:
     :show-inheritance:
@@ -38,6 +62,14 @@ replay
 scale
 -----
 .. autoclass:: numpyro.handlers.scale
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+scope
+-----
+.. autoclass:: numpyro.handlers.scope
     :members:
     :undoc-members:
     :show-inheritance:

@@ -34,10 +34,9 @@ setup(
     author_email='npradhan@uber.com',
     install_requires=[
         # TODO: pin to a specific version for the release (until JAX's API becomes stable)
-        # 'jax>=0.1.57',
-        # 'jaxlib>=0.1.37',
-        'jax==0.1.54',
-        'jaxlib==0.1.38',
+        'jax>=0.2',
+        # check min version here: https://github.com/google/jax/blob/master/jax/lib/__init__.py#L26
+        'jaxlib>=0.1.55',
         'tqdm',
     ],
     extras_require={
@@ -47,8 +46,15 @@ setup(
             'pytest>=4.1',
             'pyro-api>=0.1.1'
         ],
-        'dev': ['ipython', 'isort'],
-        'examples': ['matplotlib', 'seaborn'],
+        'dev': [
+            'funsor',
+            'ipython',
+            'isort',
+            'flax',
+            'dm-haiku',
+            'tfp-nightly',  # TODO: change this to stable release or a specific nightly release
+        ],
+        'examples': ['matplotlib', 'seaborn', 'graphviz', 'arviz'],
     },
     long_description=long_description,
     long_description_content_type='text/markdown',

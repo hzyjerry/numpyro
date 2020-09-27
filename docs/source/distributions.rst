@@ -9,9 +9,33 @@ Distribution
     :show-inheritance:
     :member-order: bysource
 
+ExpandedDistribution
+--------------------
+.. autoclass:: numpyro.distributions.distribution.ExpandedDistribution
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+ImproperUniform
+---------------
+.. autoclass:: numpyro.distributions.distribution.ImproperUniform
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 Independent
 -----------
 .. autoclass:: numpyro.distributions.distribution.Independent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+MaskedDistribution
+------------------
+.. autoclass:: numpyro.distributions.distribution.MaskedDistribution
     :members:
     :undoc-members:
     :show-inheritance:
@@ -85,6 +109,14 @@ Gamma
     :show-inheritance:
     :member-order: bysource
 
+Gumbel
+------
+.. autoclass:: numpyro.distributions.continuous.Gumbel
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 GaussianRandomWalk
 ------------------
 .. autoclass:: numpyro.distributions.continuous.GaussianRandomWalk
@@ -117,6 +149,14 @@ InverseGamma
     :show-inheritance:
     :member-order: bysource
 
+Laplace
+-------
+.. autoclass:: numpyro.distributions.continuous.Laplace
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 LKJ
 ---
 .. autoclass:: numpyro.distributions.continuous.LKJ
@@ -136,6 +176,14 @@ LKJCholesky
 LogNormal
 ---------
 .. autoclass:: numpyro.distributions.continuous.LogNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+Logistic
+--------
+.. autoclass:: numpyro.distributions.continuous.Logistic
     :members:
     :undoc-members:
     :show-inheritance:
@@ -197,6 +245,14 @@ TruncatedNormal
     :show-inheritance:
     :member-order: bysource
 
+TruncatedPolyaGamma
+-------------------
+.. autoclass:: numpyro.distributions.continuous.TruncatedPolyaGamma
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
 Uniform
 -------
 .. autoclass:: numpyro.distributions.continuous.Uniform
@@ -242,7 +298,7 @@ Binomial
 .. autofunction:: numpyro.distributions.discrete.Binomial
 
 BinomialLogits
----------------
+--------------
 .. autoclass:: numpyro.distributions.discrete.BinomialLogits
     :members:
     :undoc-members:
@@ -288,6 +344,26 @@ Delta
 GammaPoisson
 ------------
 .. autoclass:: numpyro.distributions.conjugate.GammaPoisson
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+Geometric
+---------
+.. autofunction:: numpyro.distributions.discrete.Geometric
+
+GeometricLogits
+---------------
+.. autoclass:: numpyro.distributions.discrete.GeometricLogits
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+GeometricProbs
+--------------
+.. autoclass:: numpyro.distributions.discrete.GeometricProbs
     :members:
     :undoc-members:
     :show-inheritance:
@@ -345,8 +421,38 @@ ZeroInflatedPoisson
     :show-inheritance:
     :member-order: bysource
 
+
+Directional Distributions
+=========================
+
+VonMises
+--------
+.. autoclass:: numpyro.distributions.directional.VonMises
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
+
+
+TensorFlow Distributions
+========================
+
+Thin wrappers around TensorFlow Probability (TFP) distributions. For details on the TFP distribution interface,
+see `its Distribution docs <https://www.tensorflow.org/probability/api_docs/python/tfp/substrates/jax/distributions/Distribution>`_.
+
+.. automodule:: numpyro.contrib.tfp.distributions
+
+
 Constraints
 ===========
+
+Constraint
+----------
+.. autoclass:: numpyro.distributions.constraints.Constraint
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
 
 boolean
 -------
@@ -379,6 +485,10 @@ integer_greater_than
 interval
 --------
 .. autofunction:: numpyro.distributions.constraints.interval
+
+less_than
+---------
+.. autofunction:: numpyro.distributions.constraints.less_than
 
 lower_cholesky
 --------------
@@ -496,17 +606,17 @@ InvCholeskyTransform
     :show-inheritance:
     :member-order: bysource
 
-LowerCholeskyTransform
-----------------------
-.. autoclass:: numpyro.distributions.transforms.LowerCholeskyTransform
+LowerCholeskyAffine
+-------------------
+.. autoclass:: numpyro.distributions.transforms.LowerCholeskyAffine
     :members:
     :undoc-members:
     :show-inheritance:
     :member-order: bysource
 
-MultivariateAffineTransform
----------------------------
-.. autoclass:: numpyro.distributions.transforms.MultivariateAffineTransform
+LowerCholeskyTransform
+----------------------
+.. autoclass:: numpyro.distributions.transforms.LowerCholeskyTransform
     :members:
     :undoc-members:
     :show-inheritance:

@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.abspath('../..'))
 os.environ['SPHINX_BUILD'] = '1'
 
 # HACK: This is to ensure that local functions are documented by sphinx.
-from numpyro.infer.mcmc import hmc  # noqa: E402
+from numpyro.infer.hmc import hmc  # noqa: E402
 hmc(None, None)
 
 # -- Project information -----------------------------------------------------
@@ -66,11 +66,9 @@ extensions = [
     'sphinx.ext.viewcode',
 ]
 
-# Disable documentation inheritance so as to avoid inheriting
-# docstrings in a different format, e.g. when the parent class
-# is a PyTorch class.
+# Enable documentation inheritance
 
-autodoc_inherit_docstrings = False
+autodoc_inherit_docstrings = True
 
 # autodoc_default_options = {
 #     'member-order': 'bysource',
@@ -113,6 +111,12 @@ add_module_names = False
 
 # -- Options for HTML output -------------------------------------------------
 
+# logo
+html_logo = '_static/img/pyro_logo_wide.png'
+
+# logo
+html_favicon = '_static/img/favicon/favicon.ico'
+
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
@@ -128,7 +132,8 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = []
+html_static_path = ['_static']
+html_style = 'css/pyro.css'
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
